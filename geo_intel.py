@@ -6,7 +6,7 @@ geolocates originating IP, and identifies anonymization infrastructure (TOR, VPN
 
 import ipaddress
 import re
-from typing import List, Dict, Any, Optional, Tuple
+from typing import List, Dict, Any, Optional, Tuple, Union
 from pydantic import BaseModel, Field
 
 import config
@@ -227,25 +227,34 @@ def geolocate_ip(ip: str) -> Dict[str, Any]:
         "is_hosting": False
     }
 
-def resolve_origin(relay_chain: List[Dict[str, Any]]) -> Tuple[OriginTrace, List[RelayHop]]:
+def resolve_origin(relay_chain: Union[List[str], List[Dict[str, Any]]]) -> Tuple[OriginTrace, List[RelayHop]]:
     """
     Walks relay chain bottom-up (from origin sender to final receiving MTA).
     Filters RFC1918 private IPs and trusted MTAs.
     Returns (OriginTrace, processed RelayHops).
     
-    relay_chain expected format: List of dicts ordered from sender -> receiver:
-    [
-        {"ip": "185.220.101.5", "domain": "mail.anonymous-sender.org", "timestamp": "2026-09-12T08:00:00Z"},
-        {"ip": "198.51.100.42", "domain": "relay-us.mta.net", "timestamp": "2026-09-12T08:00:05Z"},
-        {"ip": "10.0.0.5", "domain": "internal-mail.company.com", "timestamp": "2026-09-12T08:00:10Z"}
-    ]
+    Signature: resolve_origin(relay_chain: list[str]) -> OriginTrace (or tuple with hops)
+    Accepts:
+        relay_chain: List[str] (e.g. ["185.220.101.5", "198.51.100.42", "10.0.0.5"])
+        OR
+        relay_chain: List[Dict[str, Any]] (e.g. [{"ip": "...", "domain": "..."}])
     """
     processed_hops: List[RelayHop] = []
     probable_origin_ip: Optional[str] = None
     probable_origin_domain: Optional[str] = None
     
+    # Normalize relay_chain to list of dicts
+    normalized_chain: List[Dict[str, Any]] = []
+    for item in relay_chain:
+        if isinstance(item, str):
+            normalized_chain.append({"ip": item.strip(), "domain": item.strip(), "timestamp": None})
+        elif isinstance(item, dict):
+            normalized_chain.append(item)
+        else:
+            normalized_chain.append({"ip": str(item).strip(), "domain": str(item).strip(), "timestamp": None})
+
     # Process all hops for detailed visualization map
-    for idx, raw_hop in enumerate(relay_chain):
+    for idx, raw_hop in enumerate(normalized_chain):
         ip = raw_hop.get("ip", "").strip()
         domain = raw_hop.get("domain", "").strip()
         timestamp = raw_hop.get("timestamp")
