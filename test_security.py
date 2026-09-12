@@ -80,6 +80,16 @@ class TestSecurityRemediations(unittest.TestCase):
         })
         self.assertEqual(resp_long_subject.status_code, 422)
 
+        # 4. Reject invalid email_id containing non-alphanumeric characters
+        resp_bad_id = client.post("/emails/analyze", json={
+            "email_id": "EML-123<script>alert(1)</script>",
+            "subject": "Test",
+            "sender": "a@b.com",
+            "recipient": "c@d.com",
+            "relay_chain": [{"ip": "185.220.101.5", "domain": "test.org"}]
+        })
+        self.assertEqual(resp_bad_id.status_code, 422)
+
     def test_4_bounded_storage_memory_protection(self):
         """Verify EMAILS_DB never exceeds MAX_STORED_EMAILS (100) even with continuous posts."""
         # Post 120 unique valid email traces

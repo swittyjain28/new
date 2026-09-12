@@ -52,7 +52,7 @@ async def add_security_headers(request: Request, call_next):
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["GET", "POST"],
     allow_headers=["*"],
 )
@@ -100,18 +100,27 @@ class ConnectionManager:
 manager = ConnectionManager()
 
 # ---------------------------------------------------------------------------
-# 3. Rate Limiting for Trace Submissions
+# 3. Rate Limiting for Trace Submissions with Memory Pruning
 # ---------------------------------------------------------------------------
 RATE_LIMIT_STORE: Dict[str, List[float]] = defaultdict(list)
 RATE_LIMIT_MAX_REQUESTS = 30     # Max 30 requests
 RATE_LIMIT_WINDOW_SECONDS = 60   # Per 60 seconds
+MAX_TRACKED_IPS = 2000           # Memory pruning ceiling
 
 def check_rate_limit(request: Request):
     client_ip = request.client.host if request.client else "unknown"
     now = time.time()
     timestamps = RATE_LIMIT_STORE[client_ip]
+    
     # Filter timestamps within the sliding window
     valid_timestamps = [t for t in timestamps if now - t < RATE_LIMIT_WINDOW_SECONDS]
+    
+    # Periodic sweep if tracked IP store exceeds ceiling
+    if len(RATE_LIMIT_STORE) > MAX_TRACKED_IPS:
+        stale_ips = [ip for ip, ts in list(RATE_LIMIT_STORE.items()) if not ts or (now - ts[-1] >= RATE_LIMIT_WINDOW_SECONDS)]
+        for ip in stale_ips:
+            RATE_LIMIT_STORE.pop(ip, None)
+
     if len(valid_timestamps) >= RATE_LIMIT_MAX_REQUESTS:
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
@@ -129,7 +138,12 @@ class RelayHopInput(BaseModel):
     timestamp: Optional[str] = Field(None, max_length=64, description="Hop timestamp string")
 
 class EmailAnalyzeRequest(BaseModel):
-    email_id: Optional[str] = Field(None, max_length=64, description="Optional custom ID")
+    email_id: Optional[str] = Field(
+        None,
+        max_length=64,
+        pattern=r"^[a-zA-Z0-9_-]+$",
+        description="Optional custom alphanumeric trace ID (letters, numbers, hyphens, underscores only)"
+    )
     subject: str = Field("Suspicious Email Notice", max_length=255, description="Email subject line")
     sender: str = Field("unknown@attacker.net", max_length=255, description="Sender address")
     recipient: str = Field("target@company.com", max_length=255, description="Recipient address")
